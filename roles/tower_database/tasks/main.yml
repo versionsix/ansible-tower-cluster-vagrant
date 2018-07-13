@@ -1,0 +1,137 @@
+---
+- name: Check if EPEL repo is already configured.
+  stat: path={{ epel.repofile_path }}
+  register: epel_repofile_result
+
+- name: Install EPEL repo.
+  yum:
+    name: "{{ epel.repo_url }}"
+    state: present
+  register: result
+  until: 'result.rc == 0'
+  retries: 5
+  delay: 10
+  when: not epel_repofile_result.stat.exists
+
+- name: Import EPEL GPG key.
+  rpm_key:
+    key: "{{ epel.repo_gpg_key_url }}"
+    state: present
+  when: not epel_repofile_result.stat.exists
+  ignore_errors: "{{ ansible_check_mode }}"
+- name: upgrade all packages
+  yum:
+    update_cache: yes
+    name: '*'
+    state: latest
+- name: ensure ansible is at the latest version
+  yum:
+    name: ansible
+    state: latest
+- name: Check if PostgreSQL repo is already configured.
+  stat: path=/etc/yum.repos.d/pgdg-96-centos.repo
+  register: pgsql_repofile_result
+- name: Install PostgreSQL repo.
+  yum:
+    name: "https://download.postgresql.org/pub/repos/yum/9.6/redhat/rhel-7-x86_64/pgdg-centos96-9.6-3.noarch.rpm"
+    state: present
+  register: result
+  until: 'result.rc == 0'
+  retries: 5
+  delay: 10
+  when: not pgsql_repofile_result.stat.exists
+- name: ensure postgres and deps are installed
+  yum:
+    update_cache: yes
+    name: "{{ item }}"
+    state: latest
+  with_items:
+    - postgresql96 # postgresql-9.2.23-3.el7_4.i686.rpm @ 2018.07.5
+    - postgresql96-server
+    - postgresql96-contrib
+    - python-psycopg2
+
+# - name: Initiate database
+#   service:
+#     name: postgresql
+#     arguments: initdb
+# this wil throw a warning, howerver the ansible service module ignores
+# the args option. Documentation is wrong
+- name: Initiate database
+  command: /usr/pgsql-9.6/bin/postgresql96-setup initdb
+  args:
+    warn: false
+    creates: "/var/lib/pgsql/9.6/data/postgresql.conf"
+
+- name: make postgres available on outside network
+  lineinfile:
+    path: "/var/lib/pgsql/9.6/data/postgresql.conf"
+    regexp: "#listen_addresses = '*'"
+    line: "listen_addresses = '*'"
+
+- name: Set postgres conn amount
+  lineinfile:
+    path: "/var/lib/pgsql/9.6/data/postgresql.conf"
+    regexp: ".?max_connections\\s+=\\s+[\\w\\d]+"
+    line: "max_connections = {{postgres.max_connections}}"
+
+- name: Set postgres work_mem amount
+  lineinfile:
+    path: "/var/lib/pgsql/9.6/data/postgresql.conf"
+    regexp: ".?work_mem\\s+=\\s+[\\w\\d]+"
+    line: "work_mem = {{ postgres.work_mem }}MB"
+
+- name: Set postgres maintentance_work_mem amount
+  lineinfile:
+    path: "/var/lib/pgsql/9.6/data/postgresql.conf"
+    regexp: ".?maintenance_work_mem\\s+=\\s+[\\w\\d]+"
+    line: "maintenance_work_mem = {{ postgres.maintenance_work_mem }}MB"
+
+- name: Set postgres shared_buffers amount
+  lineinfile:
+    path: "/var/lib/pgsql/9.6/data/postgresql.conf"
+    regexp: ".?shared_buffers\\s+=\\s+[\\w\\d]+"
+    line: "shared_buffers = {{ postgres.shared_memory_size }}MB"
+
+- name:  make postgres listen on outside network 2
+  blockinfile:
+    path: "/var/lib/pgsql/9.6/data/pg_hba.conf"
+    block: |
+      host    all             all              0.0.0.0/0                       md5
+      host    all             all              ::/0                            md5
+
+- name: Ensure the PostgreSQL service is running
+  systemd:
+    name: postgresql-9.6
+    state: restarted
+    enabled: True
+
+- name: Ensure database is created
+  become_user: postgres
+  postgresql_db:
+    name: "{{db.tower_database}}"
+    encoding: UTF-8
+    lc_collate: en_US.UTF-8
+    lc_ctype: en_US.UTF-8
+    template: template0
+    state: present
+
+- name: Ensure user has access to the database
+  become_user: postgres
+  postgresql_user:
+    db: "{{db.tower_database}}"
+    name: "{{db.username}}"
+    password: "{{db.password}}"
+
+- name: open the postgres port
+  firewalld:
+    port: 5432/tcp
+    permanent: true
+    state: enabled
+    zone: public
+
+- name: Ensure the PostgreSQL service is running
+  systemd:
+    name: firewalld
+    state: restarted
+    enabled: True

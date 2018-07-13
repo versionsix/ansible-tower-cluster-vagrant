@@ -1,0 +1,14 @@
+---
+users:
+  - { username: 'user1', password: 'foo', email: 'test-foo@example.com'}
+  - { username: 'user2', password: 'bar', email: 'test-bar@example.com'}
+
+ansible_tower:
+  admin_user: admin
+  admin_password: password
+  version: 3.2.5
+
+db:
+  tower_database: atdb
+  username: atadmin
+  password: letmehinnn

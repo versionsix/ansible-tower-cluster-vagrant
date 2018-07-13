@@ -1,0 +1,84 @@
+---
+# Because of the provided ansible tower playbook instead of best practices role
+# we will need to set facts for this playbook to database0 to be able to load
+# them afterwards. This is a workaround till ansible supports vars_files for
+# import_playbook or when tower installation will be provided as role instead
+# of current non-automatable playbook.
+- name: "Set inter-plays variables"
+  hosts: databases[0]
+  gather_facts: yes
+  vars_files:
+    - "{{playbook_dir}}/vars.yml"
+  tasks:
+    - name: Make vars persistant
+      set_fact:
+        database_fqdn: "{{hostvars[groups['databases'][0]]['ansible_fqdn']}}"
+        pg_database: "{{db.tower_database}}"
+        pg_username: "{{db.username}}"
+        pg_password: "{{db.password}}"
+        admin_password: "{{ansible_tower.admin_password}}"
+# Playbook for database
+- name: Databases play
+  # We must use group databases and not database to prevent the following
+  # playbook include trying to override the database setup
+  hosts: databases
+  become: true
+  vars_files:
+    - "{{playbook_dir}}/vars.yml"
+  roles:
+    - tower_database
+
+# Playbook for tower
+
+# Since the redhat provided ansible installer is just a shell script system
+# Hardcoded  to a playbook we are not able to just import it as a role.
+# This requires us to look for the best workaround using import_playbook.
+# We load this playbook and try to override the settings to automate it's
+# deployment
+# Also note: the RH playbook uses Hardcoded unsafe python2 expressions which
+# breaks python3 compatibility. We also changed these to the best practices
+# found in the documentation. Licenses and original source:
+# https://releases.ansible.com/ansible-tower/setup/ansible-tower-setup-latest.tar.gz
+
+- name: tower deployment play
+  import_playbook: '{{playbook_dir}}/vendor/ansible_tower/install.yml'
+  vars:
+    ansible_become: true
+    ansible_python_interpreter: python2
+    admin_password: "{{hostvars[groups['databases'][0]]['admin_password']}}"
+    pg_host: "{{hostvars[groups['databases'][0]]['ansible_fqdn']}}"
+    pg_port: '5432'
+    pg_database: "{{hostvars[groups['databases'][0]]['pg_database']}}"
+    pg_username: "{{hostvars[groups['databases'][0]]['pg_username']}}"
+    pg_password: "{{hostvars[groups['databases'][0]]['pg_password']}}"
+    rabbitmq_port: 5672
+    rabbitmq_vhost: 'tower'
+    # The RH tower installation playbook uses ansible_host which is the wrong
+    # fact for the hostname and when using in Vagrant clustering of rabbitmq
+    # will fail. Use ansible_fqdn instead using this override.
+    # Also when the remote hosts are on a local network, default play behavior
+    # is to join nodes on external interface, and not internal. 🙃
+    rabbitmq_host: "{{ansible_fqdn}}"
+    rabbitmq_username: tower
+    rabbitmq_password: tower
+    rabbitmq_cookie: rabbitmqcookie
+    # Needs to be true for fqdns and ip addresses
+    rabbitmq_use_long_name: true
+
+# Playbook for Ansible Tower ssl certificate insertion
+- name: AT Certificate play
+  hosts: tower
+  gather_facts: True
+  become: true
+  roles:
+    - tower_certificate
+
+# Playbook for Ansible Tower configuration
+# Based on https://docs.ansible.com/ansible-tower/latest/html/userguide/import_license.html
+- name: AT Configuration play
+  hosts: tower[0]
+  gather_facts: True
+  vars_files:
+    - "{{playbook_dir}}/vars.yml"
+  roles:
+    - tower_config

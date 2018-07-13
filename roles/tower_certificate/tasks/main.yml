@@ -1,0 +1,24 @@
+---
+- name: Check for local certificate
+  local_action: stat path=certificates/tower.cert
+  # Ansible ignores become: false so will try to get sudo on local machine
+  # by forcing with become_user we are able to override this unwanted behavior
+  become_user: "{{ lookup('env','USER') }}"
+  register: stat_tower_cert
+- name: Check for local private key
+  local_action: stat path=certificates/tower.key
+  become_user: "{{ lookup('env','USER') }}"
+  register: stat_tower_key
+- name: Copy cert and key to towers
+  copy:
+    src: "{{playbook_dir}}/certificates/{{ item }}"
+    dest: "/etc/tower/{{ item }}"
+    owner: root
+    group: awx
+    mode: 0640
+  with_items:
+    - tower.key
+    - tower.cert
+  notify:
+    - restart nginx
+  when: stat_tower_cert.stat.exists and stat_tower_key.stat.exists

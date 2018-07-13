@@ -1,0 +1,11 @@
+---
+epel:
+  repo_url: "http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm"
+  repo_gpg_key_url: "https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-7"
+  repofile_path: "/etc/yum.repos.d/epel.repo"
+
+postgres:
+  max_connections: 1024
+  shared_memory_size: "{{ (ansible_memtotal_mb*0.3)|int }}"
+  work_mem: "{{ (ansible_memtotal_mb*0.03)|int }}"
+  maintenance_work_mem: "{{ (ansible_memtotal_mb*0.04)|int }}"

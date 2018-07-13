@@ -1,0 +1,44 @@
+- name: Read license file
+  local_action: set_fact at_license={{lookup('file', '{{playbook_dir}}/ansible_tower_license.txt') | from_json}}
+
+- name: Set EULA accepted
+  set_fact:
+    at_license: "{{ at_license | combine({'eula_accepted': 'true'})}}"
+
+- name: Ansible tower license parsed
+  debug:
+    msg: "AT License is {{ at_license | to_json()  }}"
+
+- name: Submit license to tower
+  uri:
+    url: "https://{{ansible_fqdn}}/api/v2/config/"
+    method: POST
+    user: "{{ansible_tower.admin_user}}"
+    password: "{{ansible_tower.admin_password}}"
+    body: "{{ at_license | to_json()  }}"
+    force_basic_auth: yes
+    status_code: [201, 200] # Created or already created
+    body_format: json
+    validate_certs: false
+
+- name: Create users
+  uri:
+    url: "https://{{ansible_fqdn}}/api/v2/users/"
+    method: POST
+    user: "{{ansible_tower.admin_user}}"
+    password: "{{ansible_tower.admin_password}}"
+    body: |
+          {
+            "username": "{{item.username}}",
+            "first_name": "{{item.first_name | default('')}}",
+            "last_name": "{{item.last_name | default('')}}",
+            "email": "{{item.email | default('')}}",
+            "is_superuser": {{item.is_superuser | default(false)}},
+            "is_system_auditor": {{item.is_system_auditor | default(false)}},
+            "password": "{{item.password}}"
+          }
+    force_basic_auth: yes
+    status_code: [201, 400] # Created or already created
+    body_format: json
+    validate_certs: false
+  loop: "{{users}}"
